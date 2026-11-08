@@ -29,6 +29,7 @@ app.get("/api/health", async (req, res) => {
 app.use("/api/auth", require("./routes/auth"));
 app.use("/api/users", require("./routes/users"));
 app.use("/api/reports", require("./routes/reports"));
+app.use("/api/uploads", require("./routes/uploads"));
 
 app.use(notFound);
 app.use(errorHandler);
