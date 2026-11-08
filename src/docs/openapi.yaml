@@ -1,0 +1,672 @@
+openapi: 3.0.3
+info:
+  title: API Laporan Kondisi Fasilitas Kampus
+  version: 1.2.0
+  description: "API latihan untuk Workshop Mobile Application Framework. Alur dasar: register, login, salin token, klik Authorize, lalu coba endpoint. Daftar, detail, dan ringkasan laporan bersifat publik. Membuat, mengubah, dan menghapus laporan serta upload foto memerlukan login."
+servers:
+  - url: /
+tags:
+  - name: Sistem
+    description: Pengecekan status server
+  - name: Auth
+    description: Registrasi, login, dan refresh token
+  - name: Users
+    description: Profil pengguna yang sedang login
+  - name: Reports
+    description: Laporan kondisi fasilitas kampus
+  - name: Uploads
+    description: Upload foto fasilitas
+  - name: Admin
+    description: Khusus dosen (memerlukan header X-Admin-Key)
+
+paths:
+  /api/health:
+    get:
+      tags: [Sistem]
+      summary: Cek status server dan database
+      responses:
+        "200":
+          description: Server berjalan
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  success: { type: boolean, example: true }
+                  message: { type: string, example: OK }
+                  data:
+                    type: object
+                    properties:
+                      status: { type: string, example: up }
+                      db: { type: string, enum: [up, down], example: up }
+                      time: { type: string, format: date-time }
+
+  /api/auth/register:
+    post:
+      tags: [Auth]
+      summary: Daftar akun baru
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [name, email, password]
+              properties:
+                name:
+                  {
+                    type: string,
+                    minLength: 1,
+                    maxLength: 100,
+                    example: Budi Santoso,
+                  }
+                email:
+                  { type: string, format: email, example: budi@example.com }
+                password: { type: string, minLength: 6, example: rahasia123 }
+      responses:
+        "201":
+          description: Registrasi berhasil
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UserResponse" }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "409":
+          description: Email sudah terdaftar
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/auth/login:
+    post:
+      tags: [Auth]
+      summary: Login dan dapatkan access token serta refresh token
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [email, password]
+              properties:
+                email:
+                  { type: string, format: email, example: budi@example.com }
+                password: { type: string, example: rahasia123 }
+      responses:
+        "200":
+          description: Login berhasil
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/LoginResponse" }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "401":
+          description: Email atau password salah
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/auth/refresh:
+    post:
+      tags: [Auth]
+      summary: Tukar refresh token dengan token baru (rotasi, sekali pakai)
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [refresh_token]
+              properties:
+                refresh_token: { type: string }
+      responses:
+        "200":
+          description: Token baru diterbitkan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/TokenResponse" }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "401":
+          description: Refresh token tidak valid, kedaluwarsa, atau sudah dipakai
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "429": { $ref: "#/components/responses/TooManyRequests" }
+
+  /api/users/me:
+    get:
+      tags: [Users]
+      summary: Ambil profil sendiri
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Profil pengguna
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProfileResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    patch:
+      tags: [Users]
+      summary: Ubah nama atau avatar (minimal satu field)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              minProperties: 1
+              properties:
+                name:
+                  {
+                    type: string,
+                    minLength: 1,
+                    maxLength: 100,
+                    example: Budi Baru,
+                  }
+                avatar_url:
+                  {
+                    type: string,
+                    format: uri,
+                    example: "https://res.cloudinary.com/demo/image/upload/foto.jpg",
+                  }
+      responses:
+        "200":
+          description: Profil diperbarui
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ProfileResponse" }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/reports:
+    get:
+      tags: [Reports]
+      summary: Daftar laporan (publik, tanpa login)
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Search"
+        - $ref: "#/components/parameters/ConditionFilter"
+        - $ref: "#/components/parameters/StatusFilter"
+      responses:
+        "200":
+          description: Daftar laporan, terbaru lebih dulu
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReportListResponse" }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+    post:
+      tags: [Reports]
+      summary: Buat laporan kondisi fasilitas
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReportInput" }
+      responses:
+        "201":
+          description: Laporan dibuat (status awal baru)
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReportResponse" }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/reports/summary:
+    get:
+      tags: [Reports]
+      summary: Jumlah laporan per tingkat kondisi dan status (publik)
+      responses:
+        "200":
+          description: Ringkasan laporan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/SummaryResponse" }
+
+  /api/reports/mine:
+    get:
+      tags: [Reports]
+      summary: Daftar laporan milik sendiri
+      security: [{ bearerAuth: [] }]
+      parameters:
+        - $ref: "#/components/parameters/Page"
+        - $ref: "#/components/parameters/Limit"
+        - $ref: "#/components/parameters/Search"
+        - $ref: "#/components/parameters/ConditionFilter"
+        - $ref: "#/components/parameters/StatusFilter"
+      responses:
+        "200":
+          description: Daftar laporan milik pengguna
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReportListResponse" }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+
+  /api/reports/{id}:
+    parameters:
+      - $ref: "#/components/parameters/ReportId"
+    get:
+      tags: [Reports]
+      summary: Detail satu laporan (publik)
+      responses:
+        "200":
+          description: Detail laporan
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReportResponse" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    put:
+      tags: [Reports]
+      summary: Ubah laporan (hanya pemilik; tidak mengubah status)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema: { $ref: "#/components/schemas/ReportInput" }
+      responses:
+        "200":
+          description: Laporan diubah
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReportResponse" }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+    delete:
+      tags: [Reports]
+      summary: Hapus laporan (hanya pemilik)
+      security: [{ bearerAuth: [] }]
+      responses:
+        "200":
+          description: Laporan dihapus
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/Envelope" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/reports/{id}/status:
+    patch:
+      tags: [Reports]
+      summary: Ubah status penanganan (pemilik, atau dosen dengan X-Admin-Key)
+      description: Status boleh berpindah ke nilai mana pun, termasuk mundur (misalnya dari selesai ke diproses).
+      security:
+        - bearerAuth: []
+        - adminKey: []
+      parameters:
+        - $ref: "#/components/parameters/ReportId"
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [status]
+              properties:
+                status: { $ref: "#/components/schemas/ReportStatus" }
+      responses:
+        "200":
+          description: Status diperbarui
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ReportResponse" }
+        "400": { $ref: "#/components/responses/ValidationFailed" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+        "404": { $ref: "#/components/responses/NotFound" }
+
+  /api/uploads/images:
+    post:
+      tags: [Uploads]
+      summary: Upload foto (JPG, PNG, atau WebP; maksimal 2 MB)
+      security: [{ bearerAuth: [] }]
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [image]
+              properties:
+                image: { type: string, format: binary }
+      responses:
+        "201":
+          description: Upload berhasil
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/UploadResponse" }
+        "400":
+          description: Field image kosong atau format file tidak valid
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+        "401": { $ref: "#/components/responses/Unauthorized" }
+        "413":
+          description: Ukuran file melebihi 2 MB
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ErrorResponse" }
+
+  /api/admin/reset:
+    post:
+      tags: [Admin]
+      summary: Reset seluruh data demo (hanya dosen)
+      description: Menghapus semua akun, laporan, dan refresh token. Dengan seed=true, data contoh dibuat ulang.
+      security: [{ adminKey: [] }]
+      parameters:
+        - name: seed
+          in: query
+          description: Isi ulang dengan data contoh setelah reset
+          schema: { type: boolean, default: false }
+      responses:
+        "200":
+          description: Data direset
+          content:
+            application/json:
+              schema: { $ref: "#/components/schemas/ResetResponse" }
+        "403": { $ref: "#/components/responses/Forbidden" }
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      bearerFormat: JWT
+      description: Access token dari POST /api/auth/login (field token).
+    adminKey:
+      type: apiKey
+      in: header
+      name: X-Admin-Key
+      description: Kunci rahasia dosen (nilai environment variable ADMIN_KEY).
+
+  parameters:
+    ReportId:
+      name: id
+      in: path
+      required: true
+      description: ID laporan (UUID)
+      schema: { type: string, format: uuid }
+    Page:
+      name: page
+      in: query
+      schema: { type: integer, minimum: 1, default: 1 }
+    Limit:
+      name: limit
+      in: query
+      schema: { type: integer, minimum: 1, maximum: 50, default: 10 }
+    Search:
+      name: search
+      in: query
+      description: Cari berdasarkan nama fasilitas atau lokasi
+      schema: { type: string }
+    ConditionFilter:
+      name: condition
+      in: query
+      schema: { $ref: "#/components/schemas/Condition" }
+    StatusFilter:
+      name: status
+      in: query
+      schema: { $ref: "#/components/schemas/ReportStatus" }
+
+  responses:
+    ValidationFailed:
+      description: Validasi gagal (body, query, atau nilai enum tidak valid)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            success: false
+            message: Validasi gagal
+            errors:
+              - {
+                  field: condition,
+                  message: "condition harus salah satu dari: baik, rusak_ringan, rusak_sedang, rusak_parah",
+                }
+    Unauthorized:
+      description: Token tidak ada, tidak valid, atau kedaluwarsa
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            success: false
+            message: Token tidak ditemukan
+    Forbidden:
+      description: Tidak punya hak akses (bukan pemilik laporan, atau X-Admin-Key salah)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            success: false
+            message: Anda bukan pemilik laporan ini
+    NotFound:
+      description: Data tidak ditemukan
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            success: false
+            message: Laporan tidak ditemukan
+    TooManyRequests:
+      description: Terlalu banyak request (rate limit)
+      content:
+        application/json:
+          schema: { $ref: "#/components/schemas/ErrorResponse" }
+          example:
+            success: false
+            message: Terlalu banyak request, coba lagi sebentar
+
+  schemas:
+    Condition:
+      type: string
+      enum: [baik, rusak_ringan, rusak_sedang, rusak_parah]
+      example: rusak_sedang
+    ReportStatus:
+      type: string
+      enum: [baru, diproses, selesai]
+      example: baru
+    ReportInput:
+      type: object
+      required: [facility_name, location, condition]
+      properties:
+        facility_name:
+          {
+            type: string,
+            minLength: 1,
+            maxLength: 150,
+            example: Proyektor Ruang Kelas,
+          }
+        location:
+          {
+            type: string,
+            minLength: 1,
+            maxLength: 150,
+            example: "Gedung A, Ruang 2.3",
+          }
+        condition: { $ref: "#/components/schemas/Condition" }
+        description:
+          {
+            type: string,
+            maxLength: 1000,
+            example: Gambar berkedip dan warna menguning.,
+          }
+        image_url:
+          {
+            type: string,
+            format: uri,
+            example: "https://res.cloudinary.com/demo/image/upload/foto.jpg",
+          }
+    Reporter:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, example: Budi Santoso }
+    Report:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        facility_name: { type: string, example: Proyektor Ruang Kelas }
+        location: { type: string, example: "Gedung A, Ruang 2.3" }
+        condition: { $ref: "#/components/schemas/Condition" }
+        status: { $ref: "#/components/schemas/ReportStatus" }
+        description:
+          {
+            type: string,
+            nullable: true,
+            example: Gambar berkedip dan warna menguning.,
+          }
+        image_url: { type: string, format: uri, nullable: true }
+        reporter: { $ref: "#/components/schemas/Reporter" }
+        created_at: { type: string, format: date-time }
+        updated_at: { type: string, format: date-time }
+    User:
+      type: object
+      properties:
+        id: { type: string, format: uuid }
+        name: { type: string, example: Budi Santoso }
+        email: { type: string, format: email, example: budi@example.com }
+        avatar_url: { type: string, format: uri, nullable: true }
+    UserProfile:
+      allOf:
+        - $ref: "#/components/schemas/User"
+        - type: object
+          properties:
+            created_at: { type: string, format: date-time }
+            updated_at: { type: string, format: date-time }
+    TokenPair:
+      type: object
+      properties:
+        token: { type: string, description: Access token (JWT, berlaku 1 jam) }
+        refresh_token:
+          {
+            type: string,
+            description: Refresh token (berlaku 7 hari,
+            sekali pakai),
+          }
+        token_type: { type: string, example: Bearer }
+        expires_in: { type: integer, example: 3600 }
+    Meta:
+      type: object
+      properties:
+        page: { type: integer, example: 1 }
+        limit: { type: integer, example: 10 }
+        total: { type: integer, example: 25 }
+        total_pages: { type: integer, example: 3 }
+    FieldError:
+      type: object
+      properties:
+        field: { type: string, example: email }
+        message: { type: string, example: Format email tidak valid }
+    Envelope:
+      type: object
+      properties:
+        success: { type: boolean, example: true }
+        message: { type: string, example: OK }
+    ErrorResponse:
+      type: object
+      properties:
+        success: { type: boolean, example: false }
+        message: { type: string }
+        errors:
+          type: array
+          items: { $ref: "#/components/schemas/FieldError" }
+    UserResponse:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/User" }
+    ProfileResponse:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/UserProfile" }
+    TokenResponse:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/TokenPair" }
+    LoginResponse:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              allOf:
+                - $ref: "#/components/schemas/TokenPair"
+                - type: object
+                  properties:
+                    user: { $ref: "#/components/schemas/User" }
+    ReportResponse:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data: { $ref: "#/components/schemas/Report" }
+    ReportListResponse:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: array
+              items: { $ref: "#/components/schemas/Report" }
+            meta: { $ref: "#/components/schemas/Meta" }
+    SummaryResponse:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                total: { type: integer, example: 6 }
+                by_condition:
+                  type: object
+                  properties:
+                    baik: { type: integer, example: 1 }
+                    rusak_ringan: { type: integer, example: 2 }
+                    rusak_sedang: { type: integer, example: 1 }
+                    rusak_parah: { type: integer, example: 2 }
+                by_status:
+                  type: object
+                  properties:
+                    baru: { type: integer, example: 3 }
+                    diproses: { type: integer, example: 2 }
+                    selesai: { type: integer, example: 1 }
+    UploadResponse:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                url:
+                  {
+                    type: string,
+                    format: uri,
+                    example: "https://res.cloudinary.com/demo/image/upload/laporan-fasilitas/foto.jpg",
+                  }
+    ResetResponse:
+      allOf:
+        - $ref: "#/components/schemas/Envelope"
+        - type: object
+          properties:
+            data:
+              type: object
+              properties:
+                seeded:
+                  type: object
+                  nullable: true
+                  properties:
+                    users: { type: integer, example: 3 }
+                    reports: { type: integer, example: 6 }
