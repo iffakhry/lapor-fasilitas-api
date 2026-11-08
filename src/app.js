@@ -2,16 +2,31 @@ const path = require("path");
 const express = require("express");
 const cors = require("cors");
 const helmet = require("helmet");
+const rateLimit = require("express-rate-limit");
 const YAML = require("yamljs");
 const env = require("./config/env");
 const pool = require("./config/db");
 const { notFound, errorHandler } = require("./middleware/errorHandler");
 
 const app = express();
-app.set("trust proxy", 1); // wajib di balik proxy Render
-app.use(helmet({ contentSecurityPolicy: false })); // CSP dimatikan agar Swagger UI tampil
+app.set("trust proxy", 1);
+app.use(helmet({ contentSecurityPolicy: false }));
 app.use(cors({ origin: env.corsOrigin }));
 app.use(express.json());
+
+const limiter = (max) =>
+  rateLimit({
+    windowMs: 60 * 1000,
+    limit: max,
+    standardHeaders: true,
+    legacyHeaders: false,
+    message: {
+      success: false,
+      message: "Terlalu banyak request, coba lagi sebentar",
+    },
+  });
+app.use("/api", limiter(Number(process.env.RATE_LIMIT_MAX) || 2000));
+app.use("/api/auth", limiter(Number(process.env.AUTH_RATE_LIMIT_MAX) || 300));
 
 app.get("/api/health", async (req, res) => {
   let db = "up";
@@ -27,11 +42,11 @@ app.get("/api/health", async (req, res) => {
   });
 });
 
-// ROUTE LAINNYA DITAMBAHKAN DI SINI PADA TAHAP BERIKUTNYA
 app.use("/api/auth", require("./routes/auth"));
 app.use("/api/users", require("./routes/users"));
 app.use("/api/reports", require("./routes/reports"));
 app.use("/api/uploads", require("./routes/uploads"));
+app.use("/api/admin", require("./routes/admin"));
 
 const spec = YAML.load(path.join(__dirname, "docs/openapi.yaml"));
 app.get("/", (req, res) => res.redirect("/docs"));
